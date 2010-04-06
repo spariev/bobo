@@ -1,0 +1,12 @@
+lib/
+**/*.iml
+**/*.ipr
+**/*.iws
+**/build/
+dist/
+doc/
+ivy/
+logs/
+tools-build/
+**/out/
+cardemo/cars.war
