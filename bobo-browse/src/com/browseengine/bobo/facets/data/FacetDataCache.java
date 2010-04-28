@@ -2,6 +2,8 @@ package com.browseengine.bobo.facets.data;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
+import it.unimi.dsi.fastutil.ints.Int2IntMap;
+import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -24,17 +26,19 @@ import com.browseengine.bobo.util.BigShortArray;
 
 public class FacetDataCache implements Serializable {
 	/**
-	 * 
+	 *
 	 */
 	private static final long serialVersionUID = 1L;
-	
+
 	public BigSegmentedArray orderArray;
 	public TermValueList valArray;
 	public int[] freqs;
 	public int[] minIDs;
 	public int[] maxIDs;
 	private final TermCountSize _termCountSize;
-	
+    public Int2IntMap indexesToDocids ;
+	private boolean fillIndexesToDocids = false;
+
 	public FacetDataCache(BigSegmentedArray orderArray,TermValueList valArray,int[] freqs,int[] minIDs,int[] maxIDs,TermCountSize termCountSize)
 	{
 		this.orderArray=orderArray;
@@ -44,7 +48,7 @@ public class FacetDataCache implements Serializable {
 		this.maxIDs=maxIDs;
 		_termCountSize = termCountSize;
 	}
-	
+
 	public FacetDataCache()
 	{
 	  this.orderArray = null;
@@ -52,9 +56,10 @@ public class FacetDataCache implements Serializable {
 	  this.maxIDs = null;
 	  this.minIDs = null;
 	  this.freqs = null;
+      this.indexesToDocids = null;
 	  _termCountSize = TermCountSize.large;
 	}
-	
+
 	private final static BigSegmentedArray newInstance(TermCountSize termCountSize,int maxDoc){
 		if (termCountSize == TermCountSize.small){
 			return new BigByteArray(maxDoc);
@@ -64,12 +69,21 @@ public class FacetDataCache implements Serializable {
 		}
 		else return new BigIntArray(maxDoc);
 	}
-	
+
+    public void load(String fieldName,IndexReader reader,TermListFactory listFactory, boolean fillIndexesToDocids) throws IOException
+    {
+        this.fillIndexesToDocids = fillIndexesToDocids;
+        load(fieldName,reader,listFactory);
+    }
+
 	public void load(String fieldName,IndexReader reader,TermListFactory listFactory) throws IOException
 	{
 	  String field = fieldName.intern();
       int maxDoc=reader.maxDoc();
-      
+      if(this.fillIndexesToDocids) {
+          indexesToDocids = new Int2IntOpenHashMap();
+          indexesToDocids.defaultReturnValue(-1);
+      }
 
       BigSegmentedArray order=this.orderArray;
       if (order == null)                        // we want to reuse the memory
@@ -81,11 +95,11 @@ public class FacetDataCache implements Serializable {
         order.ensureCapacity(maxDoc);  // no need to fill to 0, we are reseting the data anyway
       }
       this.orderArray = order;
-        
+
       IntArrayList minIDList=new IntArrayList();
       IntArrayList maxIDList=new IntArrayList();
       IntArrayList freqList = new IntArrayList();
-        
+
       int length=maxDoc+1;
       TermValueList list = listFactory == null ? new TermStringList() : listFactory.createTermList();
         TermDocs termDocs = reader.termDocs();
@@ -123,6 +137,9 @@ public class FacetDataCache implements Serializable {
               df++;
               int docid = termDocs.doc();
               order.add(docid, t);
+              if(this.fillIndexesToDocids) {
+                  indexesToDocids.put(t, docid);
+              }
               minID = docid;
               while (termDocs.next())
               {
@@ -135,7 +152,7 @@ public class FacetDataCache implements Serializable {
             freqList.add(df);
             minIDList.add(minID);
             maxIDList.add(maxID);
-            
+
             t++;
           } while (termEnum.next());
         } finally {
@@ -149,7 +166,7 @@ public class FacetDataCache implements Serializable {
         this.minIDs = minIDList.toIntArray();
         this.maxIDs = maxIDList.toIntArray();
 	}
-	
+
 	public static int[] convert(FacetDataCache dataCache,String[] vals)
 	{
 	    IntList list = new IntArrayList(vals.length);
@@ -163,13 +180,13 @@ public class FacetDataCache implements Serializable {
 	    }
 	    return list.toIntArray();
 	}
-	
+
 	public static class FacetDocComparatorSource extends DocComparatorSource{
 		private FacetHandler<FacetDataCache> _facetHandler;
 		public FacetDocComparatorSource(FacetHandler<FacetDataCache> facetHandler){
 			_facetHandler = facetHandler;
 		}
-		
+
 		@Override
 		public DocComparator getComparator(IndexReader reader, int docbase)
 				throws IOException {
@@ -178,16 +195,16 @@ public class FacetDataCache implements Serializable {
 			final FacetDataCache dataCache = _facetHandler.getFacetData(boboReader);
 			final BigSegmentedArray orderArray = dataCache.orderArray;
 			return new DocComparator() {
-				
+
 				@Override
 				public Comparable value(ScoreDoc doc) {
 					int index = orderArray.get(doc.doc);
 			        return dataCache.valArray.get(index);
 				}
-				
+
 				@Override
 				public int compare(ScoreDoc doc1, ScoreDoc doc2) {
-					return orderArray.get(doc1.doc) - orderArray.get(doc2.doc);	
+					return orderArray.get(doc1.doc) - orderArray.get(doc2.doc);
 				}
 			};
 		}
